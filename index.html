@@ -247,8 +247,22 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;
 .board{display:grid;grid-template-columns:repeat(8,1fr);gap:3px;padding:6px;aspect-ratio:1;box-sizing:border-box;width:100%;
   background:var(--well);border-radius:17px;touch-action:none;box-shadow:inset 0 3px 7px rgba(0,0,0,.18)}
 .cell{border-radius:24%;background:var(--cell);box-shadow:inset 0 3cqw 5cqw rgba(0,0,0,.12),inset 0 -1.5cqw 0 rgba(255,255,255,.4)}
-.cell.w::before{content:"";position:absolute;inset:0;border-radius:inherit;background:rgba(255,255,255,.3);animation:glint .6s ease-in-out infinite alternate}
-@keyframes glint{from{opacity:.1}to{opacity:.7}}
+.cell.w{z-index:1}
+.cell.w .sk{filter:brightness(1.14) saturate(1.12)}
+.cell.w::before{content:"";position:absolute;inset:0;border-radius:inherit;background:radial-gradient(circle at 50% 40%,rgba(255,255,255,.75),rgba(255,255,255,.15) 70%);animation:glint .55s ease-in-out infinite alternate}
+@keyframes glint{from{opacity:.15}to{opacity:.75}}
+/* "about to clear" light band across each full line */
+.lineglow{position:absolute;pointer-events:none;border-radius:10px;overflow:hidden;
+  box-shadow:0 0 0 2px rgba(255,255,255,.85),0 0 16px 5px rgba(255,226,120,.75),0 0 34px 10px rgba(255,200,80,.35);
+  background:linear-gradient(90deg,rgba(255,250,215,.0),rgba(255,250,215,.28) 15% 85%,rgba(255,250,215,0));
+  animation:lgin .18s ease-out,lgpulse .7s ease-in-out .18s infinite alternate}
+.lineglow.v{background:linear-gradient(180deg,rgba(255,250,215,.0),rgba(255,250,215,.28) 15% 85%,rgba(255,250,215,0))}
+.lineglow::after{content:"";position:absolute;inset:-20%;background:linear-gradient(100deg,transparent 38%,rgba(255,255,255,.95) 50%,transparent 62%);background-size:260% 100%;animation:shimmer 1s linear infinite;mix-blend-mode:screen}
+.lineglow.v::after{background:linear-gradient(190deg,transparent 38%,rgba(255,255,255,.95) 50%,transparent 62%);background-size:100% 260%;animation-name:shimmerV}
+@keyframes lgin{from{opacity:0;transform:scale(.96)}}
+@keyframes lgpulse{from{box-shadow:0 0 0 2px rgba(255,255,255,.7),0 0 10px 3px rgba(255,226,120,.6),0 0 24px 8px rgba(255,200,80,.25)}to{box-shadow:0 0 0 2px rgba(255,255,255,.95),0 0 20px 7px rgba(255,226,120,.85),0 0 40px 12px rgba(255,200,80,.4)}}
+@keyframes shimmer{from{background-position:130% 0}to{background-position:-130% 0}}
+@keyframes shimmerV{from{background-position:0 130%}to{background-position:0 -130%}}
 .cell.pop::after{content:"";position:absolute;inset:0;border-radius:inherit;background:var(--pc);box-shadow:0 0 14px var(--pc);
   animation:pop .42s cubic-bezier(.3,.7,.4,1) var(--d,0ms) forwards}
 @keyframes pop{0%{transform:scale(1.1);opacity:1;filter:brightness(1.8)}100%{transform:scale(.1) rotate(30deg);opacity:0}}
@@ -1988,6 +2002,7 @@ function sfx(kind,n){
     if (kind==='pick') tone(560,t,.05,'sine',.06);
     if (kind==='place'){ tone(196,t,.09,'triangle',.18); tone(392,t,.05,'sine',.05); }
     if (kind==='clear'){ const base=523.25*Math.pow(2,Math.min(n,8)/12); [0,4,7,12].forEach((s,k)=>tone(base*Math.pow(2,s/12),t+k*0.06,.22,'triangle',.12)); }
+    if (kind==='ready'){ const f=880*Math.pow(2,Math.min(n,5)*2/12); tone(f,t,.12,'sine',.05); tone(f*1.5,t+.04,.14,'sine',.035); }
     if (kind==='gem'){ tone(1318.5,t,.12,'sine',.08); tone(1975.5,t+.05,.14,'sine',.05); }
     if (kind==='win') [523.25,659.25,783.99,1046.5,1318.5].forEach((f,k)=>tone(f,t+k*0.09,.35,'triangle',.12));
     if (kind==='over') [392,330,262,196].forEach((f,k)=>tone(f,t+k*0.14,.3,'sine',.12));
@@ -2198,13 +2213,28 @@ function applyPreview(next, color){
   }
   pv = next;
 }
-function clearPreview(){ applyPreview(new Map()); }
+let glowKey='', glowEls=[];
+function setLineGlow(rows,cols){
+  const key=rows.join(',')+'|'+cols.join(',');
+  if (key===glowKey) return;
+  const before=glowEls.length;
+  glowEls.forEach(el=>el.remove()); glowEls=[]; glowKey=key;
+  if (!rows.length && !cols.length) return;
+  const first=rel(cellEls[0]), last=rel(cellEls[N*N-1]);
+  const W=last.x+last.w-first.x, H=last.y+last.h-first.y;
+  const add=(x,y,w,h,v)=>{ const d=document.createElement('div'); d.className='lineglow'+(v?' v':''); d.style.cssText=`left:${x-2}px;top:${y-2}px;width:${w+4}px;height:${h+4}px`; fxEl.append(d); glowEls.push(d); };
+  rows.forEach(r=>{ const c=rel(cellEls[r*N]); add(first.x,c.y,W,c.h,false); });
+  cols.forEach(cc=>{ const c=rel(cellEls[cc]); add(c.x,first.y,c.w,H,true); });
+  if (glowEls.length>before){ sfx('ready', glowEls.length); buzz(6); }
+}
+function clearPreview(){ applyPreview(new Map()); setLineGlow([],[]); }
 function preview(p,r,c){
   const nb=S.board.slice(), next=new Map();
   for (const [dr,dc] of p.cells){ const idx=(r+dr)*N+c+dc; nb[idx]=p.color; next.set(idx,'g'); }
   const {rows,cols}=fullLines(nb);
   for (const idx of lineCells(rows,cols)) next.set(idx,'w');
   applyPreview(next, p.color);
+  setLineGlow(rows,cols);
 }
 function moveDrag(e){
   const g=drag.g;
