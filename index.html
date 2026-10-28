@@ -338,7 +338,9 @@ body::before{content:"";position:fixed;inset:0;pointer-events:none;
 .stars3 svg:nth-child(2){width:80px;height:80px;margin-bottom:10px;animation-delay:.6s}
 .stars3 svg:nth-child(3){animation-delay:.85s;rotate:12deg}
 @keyframes starpop{0%{scale:.2;opacity:0}70%{scale:1.25;opacity:1}100%{scale:1}}
-.mpanel .corner{position:absolute;top:14px;right:14px;z-index:3;width:42px;height:42px;border-radius:14px}
+.mpanel .corners{display:flex;justify-content:center;gap:12px;margin:-6px 0 2px}
+.mpanel .corner{width:40px;height:40px;border-radius:13px}
+.mpanel .corner svg{width:21px;height:21px}
 .mpanel .corner svg{width:22px;height:22px}
 .mpanel.wide-ribbon .ribbon{min-width:104%}
 
@@ -1614,6 +1616,8 @@ const store = {
 let best = +store.get(K_BEST) || 0;
 let advLevel = Math.max(1, +store.get(K_ADV_LVL) || 1);
 let soundOn = store.get(K_SND) !== '0';
+const K_HAP='blockbloom:haptics';
+let hapticsOn = store.get(K_HAP) !== '0';
 let skin = store.get(K_SKIN);
 if (!SKINS.some(x=>x.id===skin)) skin = 'classic';
 let S = null, shownScore = 0, shownGot = {};
@@ -2008,7 +2012,36 @@ function sfx(kind,n){
     if (kind==='over') [392,330,262,196].forEach((f,k)=>tone(f,t+k*0.14,.3,'sine',.12));
   }catch(e){}
 }
-function buzz(ms){ try{ navigator.vibrate && navigator.vibrate(ms); }catch(e){} }
+/* Haptics. Android: the Vibration API. iPhone (iOS 17.4+): Safari has no Vibration API,
+   but toggling a native switch control gives a system haptic tap, so we click a hidden one. */
+const canVibrate = typeof navigator.vibrate === 'function';
+let hapLabel = null;
+function iosTap(){
+  try{
+    if (!hapLabel){
+      hapLabel = document.createElement('label');
+      hapLabel.setAttribute('aria-hidden','true');
+      hapLabel.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden';
+      const inp = document.createElement('input');
+      inp.type='checkbox'; inp.setAttribute('switch',''); inp.tabIndex=-1;
+      hapLabel.append(inp); document.body.append(hapLabel);
+    }
+    hapLabel.click();
+  }catch(e){}
+}
+function buzz(pattern){
+  if (!hapticsOn) return;
+  try{
+    if (canVibrate){ navigator.vibrate(pattern); return; }
+    // iOS gives one light tap per toggle, so a pattern [on,off,on,...] becomes a tap at the start of each "on".
+    const p = Array.isArray(pattern) ? pattern : [pattern];
+    let at = 0;
+    for (let i=0;i<p.length;i+=2){
+      if (at===0) iosTap(); else setTimeout(iosTap, at);
+      at += (p[i]||0) + Math.max(p[i+1]||0, 70);
+    }
+  }catch(e){}
+}
 
 /* ---------- modals ---------- */
 function closeModal(el){ el.hidden=true; el.innerHTML=''; }
@@ -2024,8 +2057,11 @@ function openPause(){
   const sndIco = soundOn
     ? '<svg viewBox="0 0 24 24" fill="#fff"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round"/></svg>'
     : '<svg viewBox="0 0 24 24" fill="#fff"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M16.5 9.5l5 5m0-5l-5 5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>';
+  const hapIco = hapticsOn
+    ? '<svg viewBox="0 0 24 24" fill="#fff"><rect x="8" y="3.5" width="8" height="17" rx="2.2"/><path d="M4.5 8.5l-1.5 1.8 1.5 1.7-1.5 1.8 1.5 1.7M19.5 8.5l1.5 1.8-1.5 1.7 1.5 1.8-1.5 1.7" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="#fff"><rect x="8" y="3.5" width="8" height="17" rx="2.2"/><path d="M4 5l16 14" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/></svg>';
   showModal(pauseEl,{ribbon:'Paused', color:'blue',
-    corner:`<button class="ibtn ${soundOn?'':'orange'} corner" data-act="sound" type="button" aria-label="Sound ${soundOn?'on':'off'}">${sndIco}</button>`,
+    corner:`<div class="corners"><button class="ibtn ${hapticsOn?'':'orange'} corner" data-act="haptics" type="button" aria-label="Vibration ${hapticsOn?'on':'off'}">${hapIco}</button><button class="ibtn ${soundOn?'':'orange'} corner" data-act="sound" type="button" aria-label="Sound ${soundOn?'on':'off'}">${sndIco}</button></div>`,
     body:`<p>${S.mode==='adventure'?`Level ${S.level}`:`Score ${S.score.toLocaleString()}`}</p>`, buttons:[
     {label:'Resume', act:'resume'},
     {label: S.mode==='adventure'?'Restart Level':'New Game', act:'restart', color:'cream', small:true},
@@ -2036,6 +2072,7 @@ function openPause(){
     restart:()=>{ closeModal(pauseEl); if (S.mode==='adventure') openLevel(S.level,true); else { newClassic(); enterGame(true); } },
     styles:()=>openStyles('game'),
     sound:()=>{ soundOn=!soundOn; store.set(K_SND, soundOn?'1':'0'); openPause(); if (soundOn) sfx('pick'); },
+    haptics:()=>{ hapticsOn=!hapticsOn; store.set(K_HAP, hapticsOn?'1':'0'); openPause(); buzz(15); },
     home:()=>{ closeModal(pauseEl); save(); show(S.mode==='adventure'?'map':'home'); }
   });
 }
@@ -2134,7 +2171,7 @@ function commit(i,r,c){
     if (!adv) popScore('+'+(lineScore+(allClear?300:0)), cx, cy);
     sweep(rows,cols);
     sfx('clear', lines+S.combo);
-    buzz(lines>1?[12,30,12]:15);
+    buzz(lines>=3?[14,40,14,40,14,40,20]:lines===2?[14,40,14,40,18]:[16,40,16]);
     if (lines>=2){ frameEl.classList.remove('shake'); void frameEl.offsetWidth; frameEl.classList.add('shake'); }
   } else {
     S.since++;
@@ -2265,7 +2302,7 @@ trayEl.addEventListener('pointerdown',e=>{
   drag={i,p,el,g,pw,ph,lift,gain,sx:e.clientX,sy:e.clientY,px0:e.clientX-pw/2,py0:e.clientY-lift,pid:e.pointerId,target:null,slot};
   slot.classList.add('dragging');
   try{ trayEl.setPointerCapture(e.pointerId); }catch(err){}
-  sfx('pick');
+  sfx('pick'); buzz(5);
   moveDrag(e);
 });
 trayEl.addEventListener('pointermove',e=>{ if (drag && e.pointerId===drag.pid) moveDrag(e); });
